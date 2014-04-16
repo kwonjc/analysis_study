@@ -1,0 +1,328 @@
+dplyr intro
+========================================================
+
+### dplyr 정의
+```
+ * 일괄된 빠른 데이터 처리하기 위한 기능을 제공하는 package
+```
+### dplyr 개요
+```
+ * 데이터 처리를 위한 대부분의 기능을 제공
+ 
+ * 사용자의 생각을 쉽게 코드화 할 수 있게 간단한 함수를 제공
+ 
+ * 처리하는 속도가 매우 빠름 
+
+ * plyr package 속도가 느리다는 단점을 보완한 package
+```
+
+### dplyr main functions
+```
+ * data function : tbl_df()
+ * basic function : filter(), arrange(), select(), mutate(), summarise(), group_by()
+ * join function : inner_join(), left_join(), semi_join(), anti_join()
+ * window function : 
+  - ranking and ordering : row_number(), min_rank(), dense_rank(), cume_dist(), percent_rank(), ntile()
+  - offsets : lead(), lag()
+  - Cumulative aggregates : cumall(), cumany(), cummean()
+  - base function : rank(), cumsum(), cumprod(), cummax(), cummin() etc
+```
+
+#### 1. data function : tbl_df()
+
+-- tbl_df 데이터 프레임 함수와 같지만 대량에 데이터를 print 하는 데이터 셋의 형태
+
+```{r}
+library(hflights)
+library(dplyr)
+hflights_df <- tbl_df(hflights)
+hflights_df
+rm(hflights_df)
+```
+
+#### 2. basic function : filter(), arrange(), select(), mutate(), summarise(), group_by()
+
+| dplyr | base |
+| ------ | -----: |
+| **filter** |  subset  |
+| **arrange** |  sort  |
+| **select** |  [,c(1:2)]  |
+| **mutate** |  transform  |
+| **summarise/group_by** |  aggregate  |
+
+#####2.0 data set
+```{r}
+library(hflights)
+dim(hflights)
+hflights.tmp <- rbind(hflights,hflights,hflights,hflights,hflights)
+thflights <- rbind(hflights.tmp,hflights.tmp,hflights.tmp)
+dim(thflights)
+library(data.table)
+library(sqldf)
+library(rbenchmark)
+thflights_df <- tbl_df(thflights)
+
+```
+
+##### 2.1 filter()
+```{r}
+
+benchmark(
+  dplyr_df = filter(thflights_df, Month == 1, DayofMonth == 1)
+  
+  ,dplyr = filter(thflights , Month == 1, DayofMonth == 1)
+  
+  ,base1 = thflights[thflights$Month == 1 & thflights$DayofMonth == 1, ]
+  
+  ,base2 = thflights[which(thflights$Month == 1 & thflights$DayofMonth == 1), ]
+  
+  ,subset_f = subset(thflights , Month == 1 & DayofMonth == 1)
+  
+  ,sqldf = sqldf("select * from thflights where Month = 1 and DayofMonth = 1")
+  ,replications = 1
+  ,columns = c("test", "elapsed", "user.self", "sys.self")
+  )
+
+
+```
+
+
+##### 2.2 arrange()
+
+
+```{r}
+benchmark(
+dplyr_df =  arrange(thflights_df, DayofMonth, Month, desc(FlightNum))
+
+,dplyr =  arrange(thflights, DayofMonth, Month, desc(FlightNum))
+
+,base = thflights[order(hflights$DayofMonth, hflights$Month, desc(hflights$FlightNum)), ]
+
+,sqldf =  sqldf("select * from thflights order by DayofMonth, Month, FlightNum DESC ")
+
+,replications = 1
+,columns = c("test", "elapsed", "user.self", "sys.self")
+)
+
+```
+
+##### 2.3 select()
+
+```{r}
+benchmark(
+ dplyr_df = select(thflights_df, (Year:DayOfWeek))
+
+, dplyr =  select(thflights, (Year:DayOfWeek))
+
+, base =  thflights[,1:4]
+
+, base1 =  thflights[,c("Year","Month","DayofMonth","DayOfWeek")]
+
+, sqldf =  sqldf("select Year, Month, DayofMonth, DayOfWeek from thflights")
+
+,replications = 1
+,columns = c("test", "elapsed", "user.self", "sys.self")
+)
+
+```
+
+##### 2.4 mutate()
+
+```{r}
+base<-function(){
+thflights$gain <- thflights$ArrDelay - thflights$DepDelay
+thflights$speed <- thflights$Distance / (thflights$AirTime * 60)
+}
+benchmark(
+
+dplyr_df = mutate(thflights_df,
+         gain = ArrDelay - DepDelay,
+         speed = Distance / AirTime * 60)
+
+,dplyr =  mutate(thflights,
+         gain = ArrDelay - DepDelay,
+         speed = Distance / AirTime * 60)
+
+,transform =  transform(thflights,
+            gain = ArrDelay - DepDelay,
+            speed = Distance / AirTime * 60)
+
+,sqldf =
+  sqldf("select *, ArrDelay - DepDelay gain, Distance / (AirTime * 60) speed  from thflights ")
+
+,base = base()
+,replications = 1
+,columns = c("test", "elapsed", "user.self", "sys.self")
+)
+```
+
+##### 2.5 group_by() summarise()
+
+```{r}
+dplyr_df <- function(){
+destinations <- group_by(thflights_df, Dest)
+summarise(destinations,
+          planes = n_distinct(TailNum),
+          flights = n()
+         )
+}
+
+
+dplyr <- function(){
+destinations <- group_by(thflights, Dest)
+summarise(destinations,
+          planes = n_distinct(TailNum),
+          flights = n()
+          )
+}
+
+base <- function(){
+aggregate(TailNum ~ Dest , data=thflights, FUN=length)
+aggregate(TailNum ~ Dest , data=thflights, function(x) length(unique(x)))
+}
+
+sqldf_f <- function(){
+sqldf("select count(distinct(TailNum)) planes,count() flights from thflights group by Dest")
+}
+
+benchmark(
+dplyr_df = dplyr_df()
+,dplyr = dplyr()
+,base = base()
+,sqldf = sqldf_f()
+,replications = 1
+,columns = c("test", "elapsed", "user.self", "sys.self")
+)
+
+```
+
+##### 2.6 group_by, select, summarise, filter
+
+```{r}
+dplyr_df <- function(){
+a1 <- group_by(thflights_df, Year, Month, DayofMonth)
+a2 <- select(a1, Year:DayofMonth, ArrDelay, DepDelay)
+a3 <- summarise(a2,
+                arr = mean(ArrDelay, na.rm = TRUE),
+                dep = mean(DepDelay, na.rm = TRUE))
+a4 <- filter(a3, arr > 30 | dep > 30)
+}
+
+dplyr1 <- function(){
+a1 <- group_by(thflights, Year, Month, DayofMonth)
+a2 <- select(a1, Year:DayofMonth, ArrDelay, DepDelay)
+a3 <- summarise(a2,
+                arr = mean(ArrDelay, na.rm = TRUE),
+                dep = mean(DepDelay, na.rm = TRUE))
+a4 <- filter(a3, arr > 30 | dep > 30)
+}
+
+dplyr2 <- function(){
+filter(
+  summarise(
+    select(
+      group_by(thflights, Year, Month, DayofMonth),
+      Year:DayofMonth, ArrDelay, DepDelay
+    ),
+    arr = mean(ArrDelay, na.rm = TRUE),
+    dep = mean(DepDelay, na.rm = TRUE)
+  ),
+  arr > 30 | dep > 30
+)
+}
+
+dplyr3 <- function(){
+thflights %.%
+  group_by(Year, Month, DayofMonth) %.%
+  select(Year:DayofMonth, ArrDelay, DepDelay) %.%
+  summarise(
+    arr = mean(ArrDelay, na.rm = TRUE),
+    dep = mean(DepDelay, na.rm = TRUE)
+  ) %.%
+  filter(arr > 30 | dep > 30)
+}
+
+
+base <- function(){
+a1 <- thflights[,c("Year","Month","DayofMonth","ArrDelay", "DepDelay")]
+a2 <- aggregate(. ~ Year+Month+DayofMonth, data=a1, mean, na.action = na.omit )
+a2[which(a2$ArrDelay > 30 | a2$DepDelay > 30),]
+}
+
+sqldf_f <- function(){
+sqldf("select Year, Month, DayofMonth, avg(ArrDelay) arr, avg(DepDelay) dep 
+      from thflights
+      group by Year, Month, DayofMonth 
+      having avg(ArrDelay)>30 or avg(DepDelay) >30 ")
+}
+
+benchmark(
+  dplyr_df = dplyr_df()
+  ,dplyr1 = dplyr1()
+  ,dplyr2 = dplyr2()
+  ,dplyr3 = dplyr3()
+  ,base = base()
+  ,sqldf = sqldf_f()
+  ,replications = 1
+  ,columns = c("test", "elapsed", "user.self", "sys.self")
+)
+
+```
+
+#### 3. join function
+
+
+```{r}
+# make data sets
+j_data1 <- 
+  (
+    select(thflights, FlightNum, DepDelay) %.%
+    mutate(key1 = 1:nrow(thflights))
+)
+j_data2 <- 
+  (
+select(thflights, FlightNum, ArrDelay) %.%
+mutate(key1 = 1:nrow(thflights))
+)
+j_data1_df <- tbl_df(j_data1)
+j_data2_df <- tbl_df(j_data2)
+j_data1_dt <- data.table(j_data1,key=c("key1"))
+j_data2_dt <- data.table(j_data2,key=c("key1"))
+```
+
+```{r}
+benchmark(
+  dplyr_df = inner_join(j_data1_df, j_data2_df , by="key1")
+  
+    ,dplyr = inner_join(j_data1, j_data2 , by="key1")
+
+    ,dplyr_dt = inner_join(j_data1_dt, j_data2_dt , by="key1")
+
+    ,base = merge(j_data1,j_data2, by.x = "key1", by.y="key1")
+
+    ,base_dt = merge(j_data1_dt,j_data2_dt, by.x = "key1", by.y="key1")
+
+    ,sqldf_b = sqldf("select a.*, b.* from j_data1_dt as a inner join j_data2_dt as b on a.key1=b.key1") 
+
+    ,sqldf_dt = sqldf("select * from j_data1_dt a inner join j_data2_dt b on a.key1=b.key1")
+
+    ,replications = 1
+  ,columns = c("test", "elapsed", "user.self", "sys.self")
+)
+```
+
+### dplyr 정리
+```
+ * basic function 은 dplyr패키지 속도가 빠르고 sqldf 는 속도가 느림
+ 
+ * join의 경우 data.table 형태로 변환 및 key 설정 후 merge 를 사용하는 것이 효율적임
+ 
+ * 추후 대용량 데이터에서 다시 한번 확인이 필요
+```
+
+| 함수 구분 | 패키지 |
+| ------ | -----: |
+| **basic** |  dplyr 패키지  |
+| **window function** |  dplyr 패키지  |
+| **join** |  data.table 패키지  |
+| **사용자정의함수** | plyr 패키지 |
